@@ -1,246 +1,68 @@
-# fabric_client.py — Python Hyperledger Fabric SDK wrapper
-# Handles channel connect, identity loading, transaction submit & query
-# Communicates with peers via gRPC (hfc-sdk / fabric-sdk-py)
+# fabric_client.py — Python REST client for the Node.js Fabric Gateway API
+# Replaces the old fabric-sdk-py entirely.
+# Works with Python 3.14+ using only stdlib + requests.
 
-import asyncio
 import json
 import logging
 import os
-import time
-from pathlib import Path
 from typing import Any, Dict, Optional
 
-from hfc.fabric import Client
-from hfc.fabric.peer import create_peer
-from hfc.fabric.orderer import create_orderer
-from hfc.fabric.organization import create_org
-from hfc.util.crypto.crypto import ecies
+import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 
 logger = logging.getLogger(__name__)
 
+GATEWAY_BASE_URL = os.getenv("GATEWAY_BASE_URL", "http://localhost:3000")
+GATEWAY_TIMEOUT  = int(os.getenv("GATEWAY_TIMEOUT", "30"))
+
 
 class FabricClientError(Exception):
-    """Raised on any Fabric SDK error."""
     pass
 
 
 class FabricClient:
     """
-    Thin wrapper around the Hyperledger Fabric Python SDK.
-    Manages channel connection, user enrollment, and
-    chaincode invoke / query operations.
+    Thin HTTP wrapper around the Node.js Fabric Gateway REST API.
+    Drop-in replacement for the old fabric-sdk-py FabricClient —
+    same method signatures, same return shapes.
     """
 
-    CHANNEL_NAME     = os.getenv("FABRIC_CHANNEL",    "securitylogchannel")
-    CHAINCODE_NAME   = os.getenv("FABRIC_CHAINCODE",  "security_logger")
-    ORG_NAME         = os.getenv("FABRIC_ORG",        "CloudSecOrg")
-    PEER_ENDPOINT    = os.getenv("FABRIC_PEER",       "grpcs://localhost:7051")
-    ORDERER_ENDPOINT = os.getenv("FABRIC_ORDERER",    "grpcs://localhost:7050")
-    NETWORK_PROFILE  = os.getenv("FABRIC_NET_PROFILE", "blockchain/sdk/network_profile.json")
+    def __init__(
+        self,
+        base_url: str = GATEWAY_BASE_URL,
+        timeout:  int = GATEWAY_TIMEOUT,
+    ) -> None:
+        self.base_url = base_url.rstrip("/")
+        self.timeout  = timeout
+        self._session: Optional[requests.Session] = None
 
-    def __init__(self) -> None:
-        self._client: Optional[Client] = None
-        self._user = None
-        self._channel = None
-        self._loop = asyncio.new_event_loop()
-
-    # ── Initialisation ────────────────────────────────────────────────────────
+    # ── Session / lifecycle ────────────────────────────────────────────────────
 
     def connect(self) -> None:
-        """
-        Load network profile, enrol admin user, and attach to channel.
-        Must be called once before any invoke/query.
-        """
-        profile_path = Path(self.NETWORK_PROFILE)
-        if not profile_path.exists():
-            raise FabricClientError(
-                f"Network profile not found: {profile_path}. "
-                "Run bootstrap.sh first to generate crypto material."
-            )
-
-        self._client = Client(net_profile=str(profile_path))
-        self._client.new_channel(self.CHANNEL_NAME)
-        self._channel = self._client.get_channel(self.CHANNEL_NAME)
-
-        # Load admin identity from crypto-config
-        self._user = self._client.get_user(self.ORG_NAME, "Admin")
-        if self._user is None:
-            raise FabricClientError(
-                f"Admin user not found for org {self.ORG_NAME}. "
-                "Verify crypto-config path in network_profile.json."
-            )
-
-        logger.info(
-            "FabricClient connected | channel=%s chaincode=%s org=%s",
-            self.CHANNEL_NAME, self.CHAINCODE_NAME, self.ORG_NAME,
+        session = requests.Session()
+        retry = Retry(
+            total=3,
+            backoff_factor=0.5,
+            status_forcelist=[500, 502, 503, 504],
+            allowed_methods=["GET", "POST"],
         )
+        session.mount("http://",  HTTPAdapter(max_retries=retry))
+        session.mount("https://", HTTPAdapter(max_retries=retry))
+        session.headers.update({"Content-Type": "application/json"})
+        self._session = session
+        logger.info("FabricClient connected to Gateway at %s", self.base_url)
 
     def disconnect(self) -> None:
-        """Close the event loop."""
-        if not self._loop.is_closed():
-            self._loop.close()
-        logger.info("FabricClient disconnected.")
+        if self._session:
+            self._session.close()
+            self._session = None
 
-    # ── Core Operations ───────────────────────────────────────────────────────
-
-    def invoke(self, function: str, args: list, timeout: int = 30) -> Dict[str, Any]:
-        """
-        Submit a transaction (write) to the blockchain.
-
-        Args:
-            function : chaincode function name (e.g. 'LogSecurityEvent')
-            args     : list of string arguments
-            timeout  : seconds to wait for commit confirmation
-
-        Returns:
-            dict with 'tx_id', 'status', 'payload', 'latency_ms'
-        """
-        self._ensure_connected()
-        start = time.monotonic()
-
-        try:
-            response = self._loop.run_until_complete(
-                self._client.chaincode_invoke(
-                    requestor=self._user,
-                    channel_name=self.CHANNEL_NAME,
-                    peers=[self.PEER_ENDPOINT],
-                    fcn=function,
-                    args=args,
-                    cc_name=self.CHAINCODE_NAME,
-                    wait_for_event=True,
-                    wait_for_event_timeout=timeout,
-                )
-            )
-        except Exception as exc:
-            raise FabricClientError(f"Invoke failed [{function}]: {exc}") from exc
-
-        latency_ms = round((time.monotonic() - start) * 1000, 2)
-        tx_id = self._extract_tx_id(response)
-
-        logger.info(
-            "Invoke OK | fn=%s tx_id=%s latency=%.1fms",
-            function, tx_id, latency_ms,
-        )
-        return {
-            "tx_id":      tx_id,
-            "status":     "SUCCESS",
-            "payload":    response,
-            "latency_ms": latency_ms,
-        }
-
-    def query(self, function: str, args: list) -> Dict[str, Any]:
-        """
-        Execute a read-only query (no ledger write).
-
-        Args:
-            function : chaincode function name (e.g. 'QueryEventHistory')
-            args     : list of string arguments
-
-        Returns:
-            dict with 'status', 'result' (parsed JSON or raw string), 'latency_ms'
-        """
-        self._ensure_connected()
-        start = time.monotonic()
-
-        try:
-            response = self._loop.run_until_complete(
-                self._client.chaincode_query(
-                    requestor=self._user,
-                    channel_name=self.CHANNEL_NAME,
-                    peers=[self.PEER_ENDPOINT],
-                    fcn=function,
-                    args=args,
-                    cc_name=self.CHAINCODE_NAME,
-                )
-            )
-        except Exception as exc:
-            raise FabricClientError(f"Query failed [{function}]: {exc}") from exc
-
-        latency_ms = round((time.monotonic() - start) * 1000, 2)
-
-        # Attempt JSON parse; fall back to raw string
-        try:
-            result = json.loads(response)
-        except (json.JSONDecodeError, TypeError):
-            result = response
-
-        logger.info(
-            "Query OK | fn=%s latency=%.1fms",
-            function, latency_ms,
-        )
-        return {
-            "status":     "SUCCESS",
-            "result":     result,
-            "latency_ms": latency_ms,
-        }
-
-    # ── High-Level Chaincode Helpers ──────────────────────────────────────────
-
-    def log_security_event(
-        self,
-        event_id: str,
-        event_json: str,
-        payload_to_hash: str,
-    ) -> Dict[str, Any]:
-        """Submit LogSecurityEvent transaction."""
-        return self.invoke(
-            "LogSecurityEvent",
-            [event_id, event_json, payload_to_hash],
-        )
-
-    def verify_event(
-        self,
-        event_id: str,
-        payload_to_hash: str,
-    ) -> Dict[str, Any]:
-        """Query VerifyEvent — returns VerificationResult."""
-        return self.query(
-            "VerifyEvent",
-            [event_id, payload_to_hash],
-        )
-
-    def query_event_history(
-        self,
-        asset_id: str = "",
-        from_time: str = "",
-        to_time: str = "",
-    ) -> Dict[str, Any]:
-        """Query QueryEventHistory — returns AuditTrail."""
-        return self.query(
-            "QueryEventHistory",
-            [asset_id, from_time, to_time],
-        )
-
-    def get_event(self, event_id: str) -> Dict[str, Any]:
-        """Query GetEvent — returns single SecurityEvent."""
-        return self.query("GetEvent", [event_id])
-
-    def get_event_count(self, asset_id: str = "") -> Dict[str, Any]:
-        """Query GetEventCount."""
-        return self.query("GetEventCount", [asset_id])
-
-    def query_events_by_severity(self, severity: str) -> Dict[str, Any]:
-        """Query QueryEventsBySeverity (CRITICAL/HIGH/MEDIUM/LOW)."""
-        return self.query("QueryEventsBySeverity", [severity])
-
-    # ── Internals ─────────────────────────────────────────────────────────────
-
-    def _ensure_connected(self) -> None:
-        if self._client is None or self._channel is None:
-            raise FabricClientError(
-                "FabricClient not connected. Call connect() first."
-            )
-
-    @staticmethod
-    def _extract_tx_id(response: Any) -> str:
-        """Best-effort extraction of tx_id from SDK response."""
-        if isinstance(response, str):
-            return response
-        if isinstance(response, dict):
-            return response.get("tx_id", response.get("txId", str(response)))
-        return str(response)
-
-    # ── Context Manager ───────────────────────────────────────────────────────
+    @property
+    def session(self) -> requests.Session:
+        if not self._session:
+            self.connect()
+        return self._session
 
     def __enter__(self):
         self.connect()
@@ -248,3 +70,72 @@ class FabricClient:
 
     def __exit__(self, *_):
         self.disconnect()
+
+    # ── Internal HTTP helpers ─────────────────────────────────────────────────
+
+    def _get(self, path: str, params: Optional[Dict] = None) -> Dict[str, Any]:
+        url = f"{self.base_url}{path}"
+        try:
+            resp = self.session.get(url, params=params, timeout=self.timeout)
+            resp.raise_for_status()
+            return resp.json()
+        except requests.RequestException as exc:
+            raise FabricClientError(f"GET {path} failed: {exc}") from exc
+
+    def _post(self, path: str, body: Dict[str, Any]) -> Dict[str, Any]:
+        url = f"{self.base_url}{path}"
+        try:
+            resp = self.session.post(url, json=body, timeout=self.timeout)
+            resp.raise_for_status()
+            return resp.json()
+        except requests.RequestException as exc:
+            raise FabricClientError(f"POST {path} failed: {exc}") from exc
+
+    # ── Public chaincode methods ───────────────────────────────────────────────
+
+    def log_security_event(
+        self,
+        event_id:    str,
+        event_json:  str,
+        payload_json: str,
+    ) -> Dict[str, Any]:
+        """Submit a new security event to the ledger."""
+        resp = self._post("/events", {
+            "event_id":    event_id,
+            "event_json":  event_json,
+            "payload_json": payload_json,
+        })
+        return {"status": resp["status"], "tx_id": resp.get("tx_id", event_id)}
+
+    def get_event(self, event_id: str) -> Dict[str, Any]:
+        """Retrieve a single event by ID."""
+        return self._get(f"/events/{event_id}")
+
+    def verify_event(self, event_id: str, payload_json: str) -> Dict[str, Any]:
+        """Verify that a stored event's hash matches the given payload."""
+        return self._post(f"/events/{event_id}/verify", {"payload_json": payload_json})
+
+    def query_event_history(
+        self,
+        asset_id:  str = "",
+        from_time: str = "",
+        to_time:   str = "",
+    ) -> Dict[str, Any]:
+        """Query ordered audit trail, optionally filtered by asset and time."""
+        return self._get("/history", params={
+            "assetId": asset_id,
+            "from":    from_time,
+            "to":      to_time,
+        })
+
+    def get_event_count(self, asset_id: str = "") -> Dict[str, Any]:
+        """Return total event count, optionally scoped to an asset."""
+        return self._get("/events/count", params={"assetId": asset_id})
+
+    def health_check(self) -> bool:
+        """Return True if the Gateway API is reachable and connected."""
+        try:
+            resp = self._get("/health")
+            return resp.get("status") == "ok" and resp.get("gateway") is True
+        except FabricClientError:
+            return False

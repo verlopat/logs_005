@@ -1,27 +1,15 @@
-# Install fabric SDK manually (important)
-# pip install fabric-sdk-py==1.0.0 --no-deps
+# Python 3.14 compatible — no old SDKs, pure REST client architecture
+# Install: pip install -r requirements.txt
 
-# --- FORCE COMPATIBILITY WITH fabric-sdk-py ---
-requests==2.20.0
-couchdb>=1.2
-pysha3==1.0b1
-rx>=3.0.1
-six>=1.4.0
+# HTTP (REST client for Fabric Gateway API + IPFS)
+requests>=2.32.0
 
-# --- Crypto ---
-cryptography==42.0.8
+# Cryptography (ECDSA signing, X.509)
+cryptography>=42.0.0
 
-# --- fabric-sdk-py runtime deps ---
-grpcio>=1.46.0
-aiogrpc>=1.6
-hkdf>=0.0.3
-pycryptodomex>=3.4.2
-lark-parser==0.7.1
-protobuf>=3.15.0,<4.0.0
+# Config / env
+PyYAML>=6.0.0
+python-dotenv>=1.0.0
 
-# --- Config ---
-PyYAML==6.0.2
-python-dotenv==1.0.1
-
-# --- Testing ---
-pytest==8.2.2
+# Testing
+pytest>=8.0.0
