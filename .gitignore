@@ -1,0 +1,38 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+.mypy_cache/
+
+# Environment
+.env
+
+# Fabric generated artifacts (created by bootstrap.sh at runtime)
+blockchain/network/crypto-config/
+blockchain/network/channel-artifacts/
+*.tar.gz
+
+# Chaincode build cache
+blockchain/chaincode/security_logger/vendor/
+
+# Reports output
+output/reports/*.json
+output/reports/*.csv
+
+# Docker volumes
+.docker-volumes/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
