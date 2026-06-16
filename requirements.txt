@@ -1,7 +1,30 @@
-requests==2.32.3
+# Install order matters — fabric-sdk-py must be installed with --no-deps
+# to avoid its stale requests==2.20.0 pin fighting modern packages.
+#
+# Step 1 (run once):
+#   pip install fabric-sdk-py==1.0.0 --no-deps
+# Step 2:
+#   pip install -r requirements.txt
+#
+# Or just run: pip install fabric-sdk-py==1.0.0 --no-deps && pip install -r requirements.txt
+
+# HTTP / networking
+requests>=2.28.0,<3.0.0
+
+# Cryptography
 cryptography==42.0.8
-fabric-sdk-py==1.0.0
-protobuf<4
+
+# fabric-sdk-py runtime deps (installed explicitly since we skip its resolver)
+grpcio>=1.46.0
+aiogrpc>=1.6
+hkdf>=0.0.3
+pycryptodomex>=3.4.2
+lark-parser==0.7.1
+protobuf>=3.15.0,<4.0.0
+
+# Config / env
 PyYAML==6.0.2
 python-dotenv==1.0.1
+
+# Testing
 pytest==8.2.2
