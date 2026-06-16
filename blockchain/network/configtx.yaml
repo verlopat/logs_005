@@ -1,0 +1,133 @@
+# configtx.yaml — channel/genesis block configuration
+
+Organizations:
+  - &OrdererOrg
+    Name: OrdererMSP
+    ID: OrdererMSP
+    MSPDir: crypto-config/ordererOrganizations/securitylog.com/msp
+    Policies:
+      Readers:
+        Type: Signature
+        Rule: "OR('OrdererMSP.member')"
+      Writers:
+        Type: Signature
+        Rule: "OR('OrdererMSP.member')"
+      Admins:
+        Type: Signature
+        Rule: "OR('OrdererMSP.admin')"
+
+  - &CloudSecOrg
+    Name: CloudSecOrgMSP
+    ID: CloudSecOrgMSP
+    MSPDir: crypto-config/peerOrganizations/cloudsec.securitylog.com/msp
+    Policies:
+      Readers:
+        Type: Signature
+        Rule: "OR('CloudSecOrgMSP.admin', 'CloudSecOrgMSP.peer', 'CloudSecOrgMSP.client')"
+      Writers:
+        Type: Signature
+        Rule: "OR('CloudSecOrgMSP.admin', 'CloudSecOrgMSP.client')"
+      Admins:
+        Type: Signature
+        Rule: "OR('CloudSecOrgMSP.admin')"
+      Endorsement:
+        Type: Signature
+        Rule: "OR('CloudSecOrgMSP.peer')"
+    AnchorPeers:
+      - Host: peer0.cloudsec.securitylog.com
+        Port: 7051
+
+Capabilities:
+  Channel: &ChannelCapabilities
+    V2_0: true
+  Orderer: &OrdererCapabilities
+    V2_0: true
+  Application: &ApplicationCapabilities
+    V2_5: true
+
+Application: &ApplicationDefaults
+  Organizations:
+  Policies:
+    Readers:
+      Type: ImplicitMeta
+      Rule: "ANY Readers"
+    Writers:
+      Type: ImplicitMeta
+      Rule: "ANY Writers"
+    Admins:
+      Type: ImplicitMeta
+      Rule: "MAJORITY Admins"
+    LifecycleEndorsement:
+      Type: ImplicitMeta
+      Rule: "MAJORITY Endorsement"
+    Endorsement:
+      Type: ImplicitMeta
+      Rule: "MAJORITY Endorsement"
+  Capabilities:
+    <<: *ApplicationCapabilities
+
+Orderer: &OrdererDefaults
+  OrdererType: etcdraft
+  Addresses:
+    - orderer.securitylog.com:7050
+  EtcdRaft:
+    Consenters:
+      - Host: orderer.securitylog.com
+        Port: 7050
+        ClientTLSCert: crypto-config/ordererOrganizations/securitylog.com/orderers/orderer.securitylog.com/tls/server.crt
+        ServerTLSCert: crypto-config/ordererOrganizations/securitylog.com/orderers/orderer.securitylog.com/tls/server.crt
+  BatchTimeout: 500ms
+  BatchSize:
+    MaxMessageCount: 100
+    AbsoluteMaxBytes: 99 MB
+    PreferredMaxBytes: 512 KB
+  Organizations:
+  Policies:
+    Readers:
+      Type: ImplicitMeta
+      Rule: "ANY Readers"
+    Writers:
+      Type: ImplicitMeta
+      Rule: "ANY Writers"
+    Admins:
+      Type: ImplicitMeta
+      Rule: "MAJORITY Admins"
+    BlockValidation:
+      Type: ImplicitMeta
+      Rule: "ANY Writers"
+  Capabilities:
+    <<: *OrdererCapabilities
+
+Channel: &ChannelDefaults
+  Policies:
+    Readers:
+      Type: ImplicitMeta
+      Rule: "ANY Readers"
+    Writers:
+      Type: ImplicitMeta
+      Rule: "ANY Writers"
+    Admins:
+      Type: ImplicitMeta
+      Rule: "MAJORITY Admins"
+  Capabilities:
+    <<: *ChannelCapabilities
+
+Profiles:
+  SecurityLogGenesis:
+    <<: *ChannelDefaults
+    Orderer:
+      <<: *OrdererDefaults
+      Organizations:
+        - *OrdererOrg
+    Application:
+      <<: *ApplicationDefaults
+      Organizations:
+        - *CloudSecOrg
+
+  SecurityLogChannel:
+    Consortium: SampleConsortium
+    <<: *ChannelDefaults
+    Application:
+      <<: *ApplicationDefaults
+      Organizations:
+        - *CloudSecOrg

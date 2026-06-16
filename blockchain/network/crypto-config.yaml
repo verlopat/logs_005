@@ -1,0 +1,16 @@
+# crypto-config.yaml — defines orgs, peers, orderers for cryptogen
+
+OrdererOrgs:
+  - Name: Orderer
+    Domain: securitylog.com
+    Specs:
+      - Hostname: orderer
+
+PeerOrgs:
+  - Name: CloudSecOrg
+    Domain: cloudsec.securitylog.com
+    EnableNodeOUs: true
+    Template:
+      Count: 2          # peer0, peer1
+    Users:
+      Count: 2          # User1, User2 (detection agents)
