@@ -1,144 +1,120 @@
 #!/usr/bin/env bash
-# bootstrap.sh — brings up the Hyperledger Fabric network from scratch
-# Run from: blockchain/network/
-set -e
+# bootstrap.sh — Bring up the SecurityLog Fabric network end-to-end
+# Usage: bash blockchain/network/scripts/bootstrap.sh
+# Requires: cryptogen, configtxgen, peer, docker, docker-compose
 
-FABRIC_VERSION="2.5.0"
-CA_VERSION="1.5.7"
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+NET_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
+ROOT_DIR="$(cd "${NET_DIR}/../.." && pwd)"
+
 CHANNEL_NAME="securitylogchannel"
 CHAINCODE_NAME="security_logger"
 CHAINCODE_VERSION="1.0"
-CHAINCODE_PATH="../../chaincode/security_logger"
-DELAY=3
-MAX_RETRY=5
+CHAINCODE_SEQUENCE=1
+CC_PATH="${ROOT_DIR}/blockchain/chaincode/security_logger"
+COMPOSE_FILE="${ROOT_DIR}/docker-compose.yml"
 
-RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; NC='\033[0m'
+log() { echo -e "\033[1;36m[bootstrap]\033[0m $*"; }
+err() { echo -e "\033[1;31m[ERROR]\033[0m $*" >&2; exit 1; }
 
-log()  { echo -e "${GREEN}[INFO]${NC} $1"; }
-warn() { echo -e "${YELLOW}[WARN]${NC} $1"; }
-err()  { echo -e "${RED}[ERR]${NC} $1"; exit 1; }
-
-# ── 0. Prerequisites check ────────────────────────────────────────────────────
-log "Checking prerequisites..."
-for cmd in docker docker-compose peer cryptogen configtxgen; do
-  command -v "$cmd" &>/dev/null || err "$cmd not found. Install Hyperledger Fabric binaries first."
-done
-log "All prerequisites found."
-
-# ── 1. Clean up any previous network ─────────────────────────────────────────
-log "Cleaning up previous network artifacts..."
-docker-compose -f ../../../docker-compose.yml down --volumes --remove-orphans 2>/dev/null || true
-rm -rf crypto-config channel-artifacts
-
-mkdir -p channel-artifacts
-
-# ── 2. Generate crypto material ───────────────────────────────────────────────
-log "Generating crypto material with cryptogen..."
-cryptogen generate --config=./crypto-config.yaml --output="crypto-config" \
+# ── 1. Crypto material ────────────────────────────────────────────────────────
+log "Generating crypto material..."
+cd "${NET_DIR}"
+cryptogen generate --config=crypto-config.yaml --output=crypto-config \
   || err "cryptogen failed"
-log "Crypto material generated."
 
-# ── 3. Generate genesis block ─────────────────────────────────────────────────
+# ── 2. Genesis block + channel TX ─────────────────────────────────────────────
 log "Generating genesis block..."
-export FABRIC_CFG_PATH=$(pwd)
-configtxgen -profile SecurityLogGenesis \
-  -channelID system-channel \
-  -outputBlock ./channel-artifacts/genesis.block \
-  || err "configtxgen genesis block failed"
+export FABRIC_CFG_PATH="${NET_DIR}"
+mkdir -p channel-artifacts
+configtxgen -profile SecurityLogGenesis -channelID system-channel \
+  -outputBlock channel-artifacts/genesis.block \
+  || err "configtxgen genesis failed"
 
-# ── 4. Generate channel transaction ──────────────────────────────────────────
-log "Generating channel transaction..."
-configtxgen -profile SecurityLogChannel \
-  -outputCreateChannelTx ./channel-artifacts/${CHANNEL_NAME}.tx \
-  -channelID ${CHANNEL_NAME} \
-  || err "configtxgen channel tx failed"
+log "Generating channel creation TX..."
+configtxgen -profile SecurityLogChannel -outputCreateChannelTx \
+  channel-artifacts/${CHANNEL_NAME}.tx -channelID ${CHANNEL_NAME} \
+  || err "configtxgen channel TX failed"
 
-# ── 5. Generate anchor peer update ────────────────────────────────────────────
-log "Generating anchor peer update..."
-configtxgen -profile SecurityLogChannel \
-  -outputAnchorPeersUpdate ./channel-artifacts/CloudSecOrgMSPanchors.tx \
-  -channelID ${CHANNEL_NAME} \
-  -asOrg CloudSecOrgMSP \
-  || err "configtxgen anchor peer update failed"
+log "Generating anchor peer update TX..."
+configtxgen -profile SecurityLogChannel -outputAnchorPeersUpdate \
+  channel-artifacts/CloudSecOrgMSPanchors.tx \
+  -channelID ${CHANNEL_NAME} -asOrg CloudSecOrg \
+  || err "configtxgen anchor TX failed"
 
-# ── 6. Start Docker network ────────────────────────────────────────────────────
-log "Starting Fabric Docker network..."
-docker-compose -f ../../../docker-compose.yml up -d \
+# ── 3. Docker Compose ─────────────────────────────────────────────────────────
+log "Starting Docker containers..."
+docker-compose -f "${COMPOSE_FILE}" up -d \
   || err "docker-compose up failed"
 
-log "Waiting ${DELAY}s for containers to start..."
-sleep ${DELAY}
+log "Waiting 10s for peers to initialise..."
+sleep 10
 
-# ── 7. Create channel ─────────────────────────────────────────────────────────
-log "Creating channel: ${CHANNEL_NAME}..."
+# ── 4. Create and join channel ────────────────────────────────────────────────
 export CORE_PEER_TLS_ENABLED=true
 export CORE_PEER_LOCALMSPID="CloudSecOrgMSP"
-export CORE_PEER_MSPCONFIGPATH=$(pwd)/crypto-config/peerOrganizations/cloudsec.securitylog.com/users/Admin@cloudsec.securitylog.com/msp
-export CORE_PEER_ADDRESS=localhost:7051
-export CORE_PEER_TLS_ROOTCERT_FILE=$(pwd)/crypto-config/peerOrganizations/cloudsec.securitylog.com/peers/peer0.cloudsec.securitylog.com/tls/ca.crt
-export ORDERER_CA=$(pwd)/crypto-config/ordererOrganizations/securitylog.com/orderers/orderer.securitylog.com/msp/tlscacerts/tlsca.securitylog.com-cert.pem
+export CORE_PEER_TLS_ROOTCERT_FILE="${NET_DIR}/crypto-config/peerOrganizations/cloudsec.securitylog.com/peers/peer0.cloudsec.securitylog.com/tls/ca.crt"
+export CORE_PEER_MSPCONFIGPATH="${NET_DIR}/crypto-config/peerOrganizations/cloudsec.securitylog.com/users/Admin@cloudsec.securitylog.com/msp"
+export CORE_PEER_ADDRESS="localhost:7051"
+export ORDERER_CA="${NET_DIR}/crypto-config/ordererOrganizations/securitylog.com/orderers/orderer.securitylog.com/msp/tlscacerts/tlsca.securitylog.com-cert.pem"
 
+log "Creating channel ${CHANNEL_NAME}..."
 peer channel create \
   -o localhost:7050 \
   -c ${CHANNEL_NAME} \
-  -f ./channel-artifacts/${CHANNEL_NAME}.tx \
-  --outputBlock ./channel-artifacts/${CHANNEL_NAME}.block \
-  --tls --cafile ${ORDERER_CA} \
-  || err "Channel creation failed"
+  -f ${NET_DIR}/channel-artifacts/${CHANNEL_NAME}.tx \
+  --outputBlock ${NET_DIR}/channel-artifacts/${CHANNEL_NAME}.block \
+  --tls --cafile "${ORDERER_CA}" \
+  || err "channel create failed"
 
-# ── 8. Join peers to channel ──────────────────────────────────────────────────
-for PEER_PORT in 7051 8051; do
-  log "Joining peer on port ${PEER_PORT} to channel..."
-  export CORE_PEER_ADDRESS=localhost:${PEER_PORT}
-  if [ "$PEER_PORT" == "8051" ]; then
-    export CORE_PEER_TLS_ROOTCERT_FILE=$(pwd)/crypto-config/peerOrganizations/cloudsec.securitylog.com/peers/peer1.cloudsec.securitylog.com/tls/ca.crt
-  fi
-  peer channel join -b ./channel-artifacts/${CHANNEL_NAME}.block \
-    || err "Peer join failed on port ${PEER_PORT}"
-done
+log "Joining peer0 to channel..."
+peer channel join -b ${NET_DIR}/channel-artifacts/${CHANNEL_NAME}.block \
+  || err "peer0 join failed"
 
-# ── 9. Update anchor peers ────────────────────────────────────────────────────
-log "Updating anchor peers..."
-export CORE_PEER_ADDRESS=localhost:7051
-export CORE_PEER_TLS_ROOTCERT_FILE=$(pwd)/crypto-config/peerOrganizations/cloudsec.securitylog.com/peers/peer0.cloudsec.securitylog.com/tls/ca.crt
+log "Joining peer1 to channel..."
+export CORE_PEER_ADDRESS="localhost:8051"
+peer channel join -b ${NET_DIR}/channel-artifacts/${CHANNEL_NAME}.block \
+  || err "peer1 join failed"
+export CORE_PEER_ADDRESS="localhost:7051"
+
+log "Updating anchor peer..."
 peer channel update \
-  -o localhost:7050 \
-  -c ${CHANNEL_NAME} \
-  -f ./channel-artifacts/CloudSecOrgMSPanchors.tx \
-  --tls --cafile ${ORDERER_CA} \
-  || err "Anchor peer update failed"
+  -o localhost:7050 -c ${CHANNEL_NAME} \
+  -f ${NET_DIR}/channel-artifacts/CloudSecOrgMSPanchors.tx \
+  --tls --cafile "${ORDERER_CA}" \
+  || err "anchor peer update failed"
 
-# ── 10. Package chaincode ──────────────────────────────────────────────────────
+# ── 5. Package and install chaincode ──────────────────────────────────────────
+log "Building chaincode..."
+cd "${CC_PATH}" && go mod tidy && cd "${ROOT_DIR}"
+
 log "Packaging chaincode..."
-peer lifecycle chaincode package ${CHAINCODE_NAME}.tar.gz \
-  --path ${CHAINCODE_PATH} \
+peer lifecycle chaincode package \
+  ${CHAINCODE_NAME}.tar.gz \
+  --path ${CC_PATH} \
   --lang golang \
   --label ${CHAINCODE_NAME}_${CHAINCODE_VERSION} \
-  || err "Chaincode packaging failed"
+  || err "chaincode package failed"
 
-# ── 11. Install chaincode on both peers ───────────────────────────────────────
-for PEER_PORT in 7051 8051; do
-  log "Installing chaincode on peer:${PEER_PORT}..."
-  export CORE_PEER_ADDRESS=localhost:${PEER_PORT}
-  if [ "$PEER_PORT" == "8051" ]; then
-    export CORE_PEER_TLS_ROOTCERT_FILE=$(pwd)/crypto-config/peerOrganizations/cloudsec.securitylog.com/peers/peer1.cloudsec.securitylog.com/tls/ca.crt
-  else
-    export CORE_PEER_TLS_ROOTCERT_FILE=$(pwd)/crypto-config/peerOrganizations/cloudsec.securitylog.com/peers/peer0.cloudsec.securitylog.com/tls/ca.crt
-  fi
-  peer lifecycle chaincode install ${CHAINCODE_NAME}.tar.gz \
-    || err "Chaincode install failed on port ${PEER_PORT}"
-done
+log "Installing chaincode on peer0..."
+peer lifecycle chaincode install ${CHAINCODE_NAME}.tar.gz \
+  || err "chaincode install peer0 failed"
 
-# ── 12. Get package ID ────────────────────────────────────────────────────────
-log "Fetching chaincode package ID..."
-export CORE_PEER_ADDRESS=localhost:7051
-export CORE_PEER_TLS_ROOTCERT_FILE=$(pwd)/crypto-config/peerOrganizations/cloudsec.securitylog.com/peers/peer0.cloudsec.securitylog.com/tls/ca.crt
+log "Installing chaincode on peer1..."
+export CORE_PEER_ADDRESS="localhost:8051"
+peer lifecycle chaincode install ${CHAINCODE_NAME}.tar.gz \
+  || err "chaincode install peer1 failed"
+export CORE_PEER_ADDRESS="localhost:7051"
+
+# ── 6. Approve and commit chaincode ───────────────────────────────────────────
 PACKAGE_ID=$(peer lifecycle chaincode queryinstalled \
-  | grep "${CHAINCODE_NAME}_${CHAINCODE_VERSION}" \
+  | grep ${CHAINCODE_NAME}_${CHAINCODE_VERSION} \
   | awk '{print $3}' | tr -d ',')
+
 log "Package ID: ${PACKAGE_ID}"
 
-# ── 13. Approve chaincode for org ─────────────────────────────────────────────
 log "Approving chaincode for CloudSecOrg..."
 peer lifecycle chaincode approveformyorg \
   -o localhost:7050 \
@@ -146,22 +122,25 @@ peer lifecycle chaincode approveformyorg \
   --name ${CHAINCODE_NAME} \
   --version ${CHAINCODE_VERSION} \
   --package-id ${PACKAGE_ID} \
-  --sequence 1 \
-  --tls --cafile ${ORDERER_CA} \
-  || err "Chaincode approval failed"
+  --sequence ${CHAINCODE_SEQUENCE} \
+  --tls --cafile "${ORDERER_CA}" \
+  || err "chaincode approve failed"
 
-# ── 14. Commit chaincode ──────────────────────────────────────────────────────
-log "Committing chaincode to channel..."
+log "Committing chaincode..."
 peer lifecycle chaincode commit \
   -o localhost:7050 \
   --channelID ${CHANNEL_NAME} \
   --name ${CHAINCODE_NAME} \
   --version ${CHAINCODE_VERSION} \
-  --sequence 1 \
-  --tls --cafile ${ORDERER_CA} \
+  --sequence ${CHAINCODE_SEQUENCE} \
+  --tls --cafile "${ORDERER_CA}" \
   --peerAddresses localhost:7051 \
-  --tlsRootCertFiles $(pwd)/crypto-config/peerOrganizations/cloudsec.securitylog.com/peers/peer0.cloudsec.securitylog.com/tls/ca.crt \
-  || err "Chaincode commit failed"
+  --tlsRootCertFiles "${CORE_PEER_TLS_ROOTCERT_FILE}" \
+  || err "chaincode commit failed"
 
-log "✅ Network is UP. Channel: ${CHANNEL_NAME}. Chaincode: ${CHAINCODE_NAME} deployed."
-log "Run 'python3 Main.py' from the project root to start the logging service."
+log "Chaincode committed. Querying committed chaincodes..."
+peer lifecycle chaincode querycommitted \
+  --channelID ${CHANNEL_NAME} --name ${CHAINCODE_NAME}
+
+log "\n✅  SecurityLog Fabric network is up and chaincode is deployed."
+log "Run: python3 Main.py health"

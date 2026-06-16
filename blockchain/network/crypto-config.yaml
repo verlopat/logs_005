@@ -1,4 +1,4 @@
-# crypto-config.yaml — defines orgs, peers, orderers for cryptogen
+# crypto-config.yaml — cryptogen topology for the SecurityLog network
 
 OrdererOrgs:
   - Name: Orderer
@@ -11,6 +11,6 @@ PeerOrgs:
     Domain: cloudsec.securitylog.com
     EnableNodeOUs: true
     Template:
-      Count: 2          # peer0, peer1
+      Count: 2         # peer0, peer1
     Users:
-      Count: 2          # User1, User2 (detection agents)
+      Count: 2         # User1 = detection agent; User2 = auditor

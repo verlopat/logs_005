@@ -1,8 +1,8 @@
-# configtx.yaml — channel/genesis block configuration
+# configtx.yaml — channel and genesis block configuration
 
 Organizations:
   - &OrdererOrg
-    Name: OrdererMSP
+    Name: OrdererOrg
     ID: OrdererMSP
     MSPDir: crypto-config/ordererOrganizations/securitylog.com/msp
     Policies:
@@ -17,7 +17,7 @@ Organizations:
         Rule: "OR('OrdererMSP.admin')"
 
   - &CloudSecOrg
-    Name: CloudSecOrgMSP
+    Name: CloudSecOrg
     ID: CloudSecOrgMSP
     MSPDir: crypto-config/peerOrganizations/cloudsec.securitylog.com/msp
     Policies:
@@ -78,9 +78,9 @@ Orderer: &OrdererDefaults
         ServerTLSCert: crypto-config/ordererOrganizations/securitylog.com/orderers/orderer.securitylog.com/tls/server.crt
   BatchTimeout: 500ms
   BatchSize:
-    MaxMessageCount: 100
+    MaxMessageCount: 500
     AbsoluteMaxBytes: 99 MB
-    PreferredMaxBytes: 512 KB
+    PreferredMaxBytes: 2 MB
   Organizations:
   Policies:
     Readers:
@@ -90,8 +90,8 @@ Orderer: &OrdererDefaults
       Type: ImplicitMeta
       Rule: "ANY Writers"
     Admins:
-      Type: ImplicitMeta
-      Rule: "MAJORITY Admins"
+        Type: ImplicitMeta
+        Rule: "MAJORITY Admins"
     BlockValidation:
       Type: ImplicitMeta
       Rule: "ANY Writers"
@@ -119,13 +119,13 @@ Profiles:
       <<: *OrdererDefaults
       Organizations:
         - *OrdererOrg
-    Application:
-      <<: *ApplicationDefaults
-      Organizations:
-        - *CloudSecOrg
+    Consortiums:
+      SecurityLogConsortium:
+        Organizations:
+          - *CloudSecOrg
 
   SecurityLogChannel:
-    Consortium: SampleConsortium
+    Consortium: SecurityLogConsortium
     <<: *ChannelDefaults
     Application:
       <<: *ApplicationDefaults
