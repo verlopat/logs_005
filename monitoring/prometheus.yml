@@ -1,18 +1,29 @@
-# prometheus.yml — scrapes Fabric peer metrics + Python app metrics
-
+# prometheus.yml — scrape config for Fabric + IPFS metrics
 global:
   scrape_interval: 15s
   evaluation_interval: 15s
 
 scrape_configs:
-  - job_name: 'fabric_peer0'
+  - job_name: fabric-peer0
     static_configs:
       - targets: ['peer0.cloudsec.securitylog.com:9443']
+    metrics_path: /metrics
+    scheme: http
 
-  - job_name: 'fabric_peer1'
+  - job_name: fabric-peer1
     static_configs:
-      - targets: ['peer1.cloudsec.securitylog.com:9444']
+      - targets: ['peer1.cloudsec.securitylog.com:9443']
+    metrics_path: /metrics
+    scheme: http
 
-  - job_name: 'security_logger_app'
+  - job_name: fabric-orderer
     static_configs:
-      - targets: ['host.docker.internal:8000']
+      - targets: ['orderer.securitylog.com:8443']
+    metrics_path: /metrics
+    scheme: http
+
+  - job_name: ipfs-node
+    static_configs:
+      - targets: ['ipfs:5001']
+    metrics_path: /debug/metrics/prometheus
+    scheme: http

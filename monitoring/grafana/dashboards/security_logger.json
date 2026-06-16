@@ -1,0 +1,103 @@
+{
+  "title": "Security Logger — Blockchain Metrics",
+  "uid": "seclogger-001",
+  "schemaVersion": 38,
+  "version": 1,
+  "refresh": "10s",
+  "panels": [
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "Total Events Logged",
+      "gridPos": {"x": 0, "y": 0, "w": 6, "h": 4},
+      "targets": [
+        {
+          "expr": "fabric_ledger_transaction_count{channel='securitylogchannel'}",
+          "legendFormat": "TX Count"
+        }
+      ],
+      "options": {"colorMode": "background", "graphMode": "area"}
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Commit Latency p95 (ms)",
+      "gridPos": {"x": 6, "y": 0, "w": 6, "h": 4},
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, rate(fabric_broadcast_validate_duration_seconds_bucket[1m])) * 1000",
+          "legendFormat": "p95 latency ms"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "steps": [
+              {"color": "green", "value": null},
+              {"color": "yellow", "value": 300},
+              {"color": "red", "value": 500}
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": 3,
+      "type": "graph",
+      "title": "Throughput (TPS)",
+      "gridPos": {"x": 0, "y": 4, "w": 12, "h": 8},
+      "targets": [
+        {
+          "expr": "rate(fabric_ledger_transaction_count{channel='securitylogchannel'}[1m])",
+          "legendFormat": "TPS"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "graph",
+      "title": "IPFS Add Latency (ms)",
+      "gridPos": {"x": 12, "y": 4, "w": 12, "h": 8},
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, rate(ipfs_http_request_duration_seconds_bucket{handler='add'}[1m])) * 1000",
+          "legendFormat": "IPFS p95 add ms"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "type": "stat",
+      "title": "Integrity Verification Failures",
+      "gridPos": {"x": 12, "y": 0, "w": 6, "h": 4},
+      "targets": [
+        {
+          "expr": "sum(security_logger_integrity_failures_total)",
+          "legendFormat": "Failures"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "steps": [
+              {"color": "green", "value": null},
+              {"color": "red", "value": 1}
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": 6,
+      "type": "stat",
+      "title": "IPFS Repo Size (GB)",
+      "gridPos": {"x": 18, "y": 0, "w": 6, "h": 4},
+      "targets": [
+        {
+          "expr": "ipfs_repo_size_bytes / 1e9",
+          "legendFormat": "Repo GB"
+        }
+      ]
+    }
+  ]
+}
