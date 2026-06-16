@@ -1,0 +1,92 @@
+{
+  "name": "security-log-network",
+  "version": "1.0.0",
+  "client": {
+    "organization": "CloudSecOrg",
+    "connection": {
+      "timeout": {
+        "peer":    { "endorser": "300" },
+        "orderer": "300"
+      }
+    }
+  },
+  "channels": {
+    "securitylogchannel": {
+      "orderers": ["orderer.securitylog.com"],
+      "peers": {
+        "peer0.cloudsec.securitylog.com": {
+          "endorsingPeer":  true,
+          "chaincodeQuery": true,
+          "ledgerQuery":    true,
+          "eventSource":    true
+        },
+        "peer1.cloudsec.securitylog.com": {
+          "endorsingPeer":  true,
+          "chaincodeQuery": true,
+          "ledgerQuery":    true,
+          "eventSource":    false
+        }
+      }
+    }
+  },
+  "organizations": {
+    "CloudSecOrg": {
+      "mspid": "CloudSecOrgMSP",
+      "peers": [
+        "peer0.cloudsec.securitylog.com",
+        "peer1.cloudsec.securitylog.com"
+      ],
+      "certificateAuthorities": ["ca.cloudsec.securitylog.com"],
+      "adminPrivateKey": {
+        "path": "blockchain/network/crypto-config/peerOrganizations/cloudsec.securitylog.com/users/Admin@cloudsec.securitylog.com/msp/keystore/priv_sk"
+      },
+      "signedCert": {
+        "path": "blockchain/network/crypto-config/peerOrganizations/cloudsec.securitylog.com/users/Admin@cloudsec.securitylog.com/msp/signcerts/Admin@cloudsec.securitylog.com-cert.pem"
+      }
+    }
+  },
+  "orderers": {
+    "orderer.securitylog.com": {
+      "url": "grpcs://localhost:7050",
+      "grpcOptions": {
+        "ssl-target-name-override": "orderer.securitylog.com",
+        "hostnameOverride":         "orderer.securitylog.com"
+      },
+      "tlsCACerts": {
+        "path": "blockchain/network/crypto-config/ordererOrganizations/securitylog.com/orderers/orderer.securitylog.com/msp/tlscacerts/tlsca.securitylog.com-cert.pem"
+      }
+    }
+  },
+  "peers": {
+    "peer0.cloudsec.securitylog.com": {
+      "url": "grpcs://localhost:7051",
+      "grpcOptions": {
+        "ssl-target-name-override": "peer0.cloudsec.securitylog.com",
+        "hostnameOverride":         "peer0.cloudsec.securitylog.com"
+      },
+      "tlsCACerts": {
+        "path": "blockchain/network/crypto-config/peerOrganizations/cloudsec.securitylog.com/peers/peer0.cloudsec.securitylog.com/tls/ca.crt"
+      }
+    },
+    "peer1.cloudsec.securitylog.com": {
+      "url": "grpcs://localhost:8051",
+      "grpcOptions": {
+        "ssl-target-name-override": "peer1.cloudsec.securitylog.com",
+        "hostnameOverride":         "peer1.cloudsec.securitylog.com"
+      },
+      "tlsCACerts": {
+        "path": "blockchain/network/crypto-config/peerOrganizations/cloudsec.securitylog.com/peers/peer1.cloudsec.securitylog.com/tls/ca.crt"
+      }
+    }
+  },
+  "certificateAuthorities": {
+    "ca.cloudsec.securitylog.com": {
+      "url": "https://localhost:7054",
+      "caName": "ca-cloudsec",
+      "tlsCACerts": {
+        "path": "blockchain/network/crypto-config/peerOrganizations/cloudsec.securitylog.com/ca"
+      },
+      "httpOptions": { "verify": false }
+    }
+  }
+}
