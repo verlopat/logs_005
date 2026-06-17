@@ -1,32 +1,44 @@
 #!/usr/bin/env bash
-# teardown.sh — cleanly stop the SecurityLog network and Gateway API
+# teardown.sh — Cleanly stop the SecurityLog Fabric network
+# Usage: bash blockchain/network/scripts/teardown.sh
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
-COMPOSE_FILE="${ROOT_DIR}/docker-compose.yml"
 GATEWAY_DIR="${ROOT_DIR}/gateway"
+COMPOSE_FILE="${ROOT_DIR}/docker-compose.yml"
 
-log() { echo -e "\033[1;33m[teardown]\033[0m $*"; }
+log() { echo -e "\033[1;36m[teardown]\033[0m $*"; }
+ok()  { echo -e "\033[1;32m[teardown]\033[0m ✅  $*"; }
 
-# Stop Gateway API
+# Kill gateway process
 if [ -f "${GATEWAY_DIR}/gateway.pid" ]; then
   PID=$(cat "${GATEWAY_DIR}/gateway.pid")
-  log "Stopping Gateway API (PID=${PID})..."
-  kill "$PID" 2>/dev/null || true
+  if kill -0 "${PID}" 2>/dev/null; then
+    log "Stopping Gateway API (PID=${PID})..."
+    kill "${PID}" && sleep 1
+    ok "Gateway stopped."
+  fi
   rm -f "${GATEWAY_DIR}/gateway.pid"
 fi
 
+# Detect docker-compose v1 vs v2
+if command -v docker-compose &>/dev/null; then
+  DC="docker-compose"
+else
+  DC="docker compose"
+fi
+
 log "Stopping Docker containers..."
-docker-compose -f "${COMPOSE_FILE}" down --volumes --remove-orphans 2>/dev/null || true
+${DC} -f "${COMPOSE_FILE}" down --volumes --remove-orphans 2>/dev/null || true
+ok "Containers stopped and volumes removed."
 
-log "Removing chaincode Docker images..."
-docker images -q 'dev-peer*' 2>/dev/null | xargs -r docker rmi -f || true
+log "Cleaning up generated artifacts..."
+NET_DIR="${ROOT_DIR}/blockchain/network"
+rm -rf "${NET_DIR}/crypto-config" \
+       "${NET_DIR}/channel-artifacts" \
+       "${ROOT_DIR}/security_logger.tar.gz"
+ok "Artifacts cleaned."
 
-log "Removing generated artifacts..."
-rm -rf "${ROOT_DIR}/blockchain/network/crypto-config"
-rm -rf "${ROOT_DIR}/blockchain/network/channel-artifacts"
-rm -f  "${ROOT_DIR}/security_logger.tar.gz"
-
-log "✅  Network torn down."
+ok "Teardown complete."
